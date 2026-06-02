@@ -4,7 +4,7 @@
 <!-- Pickleball v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v2.3 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v2.32 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -2564,20 +2564,36 @@ function _buildLiveFromRows(rows) {
 
 
 // ── Khi trận kết thúc: fetch kết quả mới → cập nhật _M scores + re-render ──
+// v2: dùng recentResults (chỉ 20 row cuối) thay vì full KetQua → nhanh ~3x
 async function _syncFinishedMatches(finishedKeys) {
   try {
-    // Fetch results sheet để lấy scores mới nhất
-    const d = await gGet({ action: 'results', code: 'all' }, 10000);
-    if (!d?.rows?.length) return;
-    buildDkFromResults(d.rows.slice(1));
+    // Xác định giải cần fetch (ưu tiên giải đang xem để không fetch thừa)
+    const giaiParam = ROLE === 'manager'
+      ? (_resolveGiaiName(MY_GIAI) || MY_GIAI)
+      : (_curTourn ? String(_curTourn[1]||'') : '');
+
+    // Bước 1: thử recentResults trước (nhanh ~200ms) — chỉ lấy 20 row mới nhất
+    let gotData = false;
+    try {
+      const rd = await gGet({ action:'recentResults', giai: giaiParam, limit: 30 }, 4000);
+      if (rd?.rows?.length > 1) {
+        buildDkFromResults(rd.rows.slice(1));
+        gotData = true;
+      }
+    } catch(e2) {}
+
+    // Bước 2: nếu recentResults không có → fallback full results
+    if (!gotData) {
+      const d = await gGet({ action:'results', giai: giaiParam }, 8000);
+      if (!d?.rows?.length) return;
+      buildDkFromResults(d.rows.slice(1));
+    }
 
     // Cập nhật _M với scores từ KetQua cho các trận vừa finish
     finishedKeys.forEach(liveKey => {
-      // liveKey format: "nd|bang|code"
       const parts = liveKey.split('|');
       if (parts.length < 3) return;
       const nd = parts[0], bang = parts[1], code = parts.slice(2).join('|');
-      // Tìm trong _dkScores theo bang|code hoặc giai|bang|code
       const m = _M.find(mr =>
         String(mr[1]||'')===nd && String(mr[2]||'')===bang && String(mr[3]||'')===code
       );
@@ -2585,7 +2601,6 @@ async function _syncFinishedMatches(finishedKeys) {
       const giai = String(m[0]||'').trim();
       const scoreEntry = _dkScores[`${giai}|${nd}|${bang}|${code}`]; // giai|noidung|bang|code
       if (scoreEntry) {
-        // Cập nhật _M cache với scores từ KetQua
         const mIdx = _M.indexOf(m);
         if (mIdx >= 0) {
           _M[mIdx][5] = scoreEntry.scoreA !== null ? scoreEntry.scoreA : _M[mIdx][5];
@@ -2595,20 +2610,38 @@ async function _syncFinishedMatches(finishedKeys) {
       }
     });
 
-    // Re-render nếu đang xem bảng đấu
-    if (_curPage === 'tournaments' && _curNd && _curGiaiId) {
-      const tvNd = document.getElementById('tv-nd');
-      if (tvNd && tvNd.style.display !== 'none') {
-        renderBangList(_curGiaiId, _curNd);
-        toast('✅ Cập nhật kết quả realtime', 'ok');
+    // Re-render ngay lập tức
+    const _reRender = () => {
+      if (_curPage === 'tournaments' && _curNd && _curGiaiId) {
+        const tvNd = document.getElementById('tv-nd');
+        if (tvNd && tvNd.style.display !== 'none') {
+          renderBangList(_curGiaiId, _curNd);
+          toast('✅ Kết quả đã cập nhật', 'ok');
+        }
       }
-    }
-    // Re-render dashboard nếu đang xem
-    if (_curPage === 'dashboard') {
-      const giaiId = document.getElementById('dash-giai').value;
-      const gn = giaiId ? ((_T.find(t=>String(t[0]||'')===giaiId)||[])[1]||giaiId) : '';
-      _renderDashFromLocal(gn, document.getElementById('dash-nd')?.value||'', document.getElementById('dash-bang')?.value||'');
-    }
+      if (_curPage === 'dashboard') {
+        const giaiId = document.getElementById('dash-giai').value;
+        const gn = giaiId ? ((_T.find(t=>String(t[0]||'')===giaiId)||[])[1]||giaiId) : '';
+        _renderDashFromLocal(gn, document.getElementById('dash-nd')?.value||'', document.getElementById('dash-bang')?.value||'');
+      }
+      // Cập nhật cây thi đấu nếu có KO match vừa xong
+      if (_bkGiai && _bkNd) {
+        const ndWrap = document.getElementById('nd-bk-wrap');
+        if (ndWrap && ndWrap.offsetParent !== null) {
+          const realWrap = document.getElementById('bk-wrap');
+          if (realWrap) realWrap.id = '_bk_swap_hidden';
+          ndWrap.id = 'bk-wrap';
+          try { bkRender(); } finally {
+            ndWrap.id = 'nd-bk-wrap';
+            if (realWrap) realWrap.id = 'bk-wrap';
+          }
+        } else if (_curPage === 'bracket') {
+          bkRender();
+        }
+      }
+    };
+    _reRender();
+
   } catch(e) {
     console.warn('[syncFinished]', e);
   }
@@ -3140,8 +3173,61 @@ function showApp() {
 
 // ── Live polling: cập nhật _lK + _liveScores mỗi 8 giây ──
 // Chỉ fetch LiveScore (nhẹ) — không gọi dashboard API nặng
+// Fast results poller: mỗi 5s kiểm tra recentResults riêng biệt
+// → catch kết quả bị miss do race condition (GAS xóa LiveScore trước khi admin poll)
+let _resultsTimer = null;
+let _lastResultsCheck = 0;
+function _startResultsPolling() {
+  if (_resultsTimer) return;
+  _resultsTimer = setInterval(async () => {
+    try {
+      if (!GS || _failCount > 3) return;
+      // Chỉ fetch khi đang ở trang bảng đấu hoặc cây thi đấu
+      if (!['tournaments','bracket'].includes(_curPage)) return;
+      // Debounce: không fetch nếu vừa fetch < 4s trước
+      if (Date.now() - _lastResultsCheck < 4000) return;
+      _lastResultsCheck = Date.now();
+
+      const giaiParam = ROLE === 'manager'
+        ? (_resolveGiaiName(MY_GIAI) || MY_GIAI)
+        : (_curTourn ? String(_curTourn[1]||'') : '');
+      if (!giaiParam) return;
+
+      const rd = await gGet({ action:'recentResults', giai: giaiParam, limit: 30 }, 4000)
+                         .catch(() => null);
+      if (!rd?.rows?.length) return;
+
+      const prevDkSize = _dkBangCode.size;
+      buildDkFromResults(rd.rows.slice(1));
+
+      // Nếu có kết quả mới → re-render ngay
+      if (_dkBangCode.size !== prevDkSize) {
+        if (_curPage === 'tournaments' && _curNd && _curGiaiId) {
+          const tvNd = document.getElementById('tv-nd');
+          if (tvNd && tvNd.style.display !== 'none') {
+            renderBangList(_curGiaiId, _curNd);
+          }
+        }
+        if (_bkGiai && _bkNd) {
+          const ndWrap = document.getElementById('nd-bk-wrap');
+          if (ndWrap && ndWrap.offsetParent !== null) {
+            const realWrap = document.getElementById('bk-wrap');
+            if (realWrap) realWrap.id = '_bk_swap_hidden';
+            ndWrap.id = 'bk-wrap';
+            try { bkRender(); } finally {
+              ndWrap.id = 'nd-bk-wrap';
+              if (realWrap) realWrap.id = 'bk-wrap';
+            }
+          }
+        }
+      }
+    } catch(e) {}
+  }, 5000); // check mỗi 5s
+}
+
 function startLivePolling() {
   if (_liveTimer) return;
+  _startResultsPolling(); // bắt đầu fast results polling song song
   _liveTimer = setInterval(async () => {
     try {
       if (!GS || _failCount > 3) return;
@@ -3150,7 +3236,7 @@ function startLivePolling() {
         : (_curTourn ? String(_curTourn[1]||'') : '');
       // FIX v13: Luôn lấy ALL live rows, không filter giai ở GAS
       // → _lK có đủ tất cả playing keys, tránh bị nhảy về subset
-      const ld = await gGet({ action:'live', code:'all', giai: '' }, 8000);
+      const ld = await gGet({ action:'live', code:'all', giai: '' }, 5000);
       const rows = ld?.rows?.slice(1) || [];
       _buildLiveFromRows(rows);
       // Re-render live card nếu đang ở dashboard
@@ -3165,7 +3251,7 @@ function startLivePolling() {
         // nhưng debounce 3s để không spam GAS khi có nhiều live update
         if (rows.length > 0 && !_liveReplayDashPending) {
           _liveReplayDashPending = true;
-          setTimeout(() => { _liveReplayDashPending = false; if(_curPage==='dashboard') loadDash(); }, 3000);
+          setTimeout(() => { _liveReplayDashPending = false; if(_curPage==='dashboard') loadDash(); }, 1500);
         }
       }
       if (_curPage === 'tournaments' && _curNd && _curTourn) {
@@ -3180,7 +3266,7 @@ function startLivePolling() {
       if (_bkGiai && _bkNd) bkRender();
     }
     } catch(e) {}
-  }, 8000);
+  }, 3000); // Poll mỗi 3s (giảm từ 8s) để phát hiện kết quả nhanh hơn
 }
 
 function doLogout() {
@@ -3189,6 +3275,7 @@ function doLogout() {
   // Giữ lại pb_gs_url để không phải nhập lại URL lần sau
   clearInterval(_dtimer); clearInterval(_rtimer);
   clearInterval(_liveTimer); clearInterval(_liveTimer2);
+  clearInterval(_resultsTimer); _resultsTimer = null;
   _bkStopAutoPolling();
   location.reload();
 }
