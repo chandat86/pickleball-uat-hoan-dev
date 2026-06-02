@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- Pickleball v8.7 2026-06-03: FIX layout HTML về cấu trúc gốc; player-slot fixed height 44px; serve-balls min-width giữ chỗ | v8.6: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
+<!-- Pickleball v8.8 2026-06-03: FIX swapPlayersDisplay — chấm cam giữ nguyên ô vật lý khi swap tên VĐV | v8.7; player-slot fixed height 44px; serve-balls min-width giữ chỗ | v8.6: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
 <meta charset="UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>v2.52 - Da Nang Referee v17 – Pickleball</title>
+<title>v2.53 - Da Nang Referee v17 – Pickleball</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -3379,10 +3379,32 @@ function toggleServe() { S.server=S.server==='a'?'b':'a'; render(); }
 
 function swapSides() { confirmSwap(); }
 
-/* ── Hoán đổi vị trí hiển thị 2 VĐV (không đổi serve dots) ── */
+/* ── Hoán đổi vị trí hiển thị 2 VĐV — chấm cam giữ nguyên ô vật lý ── */
 function swapPlayersDisplay(side) {
-  if (side === 'a') { S.posA = [S.posA[1], S.posA[0]]; }
-  else              { S.posB = [S.posB[1], S.posB[0]]; }
+  if (side === 'a') {
+    // Lưu lại ô nào đang có chấm cam TRƯỚC khi swap
+    // posA[0] = playerDataIdx ở Ô1(bot), posA[1] = playerDataIdx ở Ô2(top)
+    const servingSlot = (S.server === 'a')
+      ? (S.posA[0] === S.serverPlayerIdx ? 'bot' : 'top')  // ô bot hay top đang có chấm
+      : null;
+
+    S.posA = [S.posA[1], S.posA[0]]; // hoán đổi 2 người
+
+    // Sau swap: đặt serverPlayerIdx = người MỚI ở đúng ô đó
+    if (servingSlot === 'bot') S.serverPlayerIdx = S.posA[0]; // bot vẫn là Ô1 = posA[0]
+    if (servingSlot === 'top') S.serverPlayerIdx = S.posA[1]; // top vẫn là Ô2 = posA[1]
+  } else {
+    const servingSlot = (S.server === 'b')
+      ? (S.posB[0] === S.serverPlayerIdx ? 'top' : 'bot')  // đội B: posB[0]=Ô1(top), posB[1]=Ô2(bot)
+      : null;
+
+    S.posB = [S.posB[1], S.posB[0]];
+
+    if (servingSlot === 'top') S.serverPlayerIdx = S.posB[0];
+    if (servingSlot === 'bot') S.serverPlayerIdx = S.posB[1];
+  }
+  render();
+}
   render();
 }
 
