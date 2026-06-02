@@ -4922,10 +4922,14 @@ function switchNdTab(tab, _skipHash) {
     _savePLayersCtx(); // lưu players context khi rời tab danh sách
   }
   if (tab === 'bracket') {
-    _bkRestoreState(); // khôi phục sau reload nếu _curGiaiId chưa set
+    // Chỉ restore từ sessionStorage khi KHÔNG có context hiện tại (trường hợp reload trang)
+    if (!_curGiaiId && !_curNd) _bkRestoreState();
+    const prevNd = _bkNd;
     _bkGiai = _curGiaiId || _bkGiai || '';
     _bkNd   = _curNd     || _bkNd   || '';
     _bkGiaiName = _resolveGiaiName(_bkGiai) || _bkGiaiName || _bkGiai;
+    // Nếu đổi nội dung → xóa cache cây cũ để bkRender build lại từ đầu
+    if (prevNd !== _bkNd) _bkCurrentTree = null;
     _bkOverrides = _bkLoadOverrides();
     _ndBkRender();
     // Hiện thanh cuộn ngang fixed
@@ -6139,9 +6143,12 @@ async function confirmGenerateSchedule() {
 
 // ── Render cây thi đấu vào nd-bk-wrap (dùng ID swap) ──
 function _ndBkRender() {
+  const prevGiai = _bkGiai, prevNd = _bkNd;
   _bkGiai = _curGiaiId || _bkGiai;
   _bkNd   = _curNd     || _bkNd;
   _bkGiaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
+  // Xóa cache tree nếu giải/nội dung thay đổi để tránh hiển thị cây cũ
+  if (prevGiai !== _bkGiai || prevNd !== _bkNd) _bkCurrentTree = null;
   _bkOverrides = _bkLoadOverrides();
   _bkSaveState(); // lưu state để restore sau reload
   const ndWrap  = document.getElementById('nd-bk-wrap');
@@ -6235,6 +6242,8 @@ async function _swapBkWrap(altId, fn) {
 
 // ── Click nội dung → View Bảng ──
 function openNdDetail(giaiId, nd) {
+  // Xóa cache cây cũ khi chuyển sang nội dung khác
+  if (_curNd !== nd || _curGiaiId !== giaiId) _bkCurrentTree = null;
   _curNd = nd; _curGiaiId = giaiId;
   _switchPlayersCtx(giaiId, nd);
   const r = _T.find(t=>String(t[0]||'')===giaiId);
