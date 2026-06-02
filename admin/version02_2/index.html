@@ -4,7 +4,7 @@
 <!-- Pickleball v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v2.32 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v2.33 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -3156,6 +3156,10 @@ function showApp() {
     }
     if (lsR) { buildDkFromResults(JSON.parse(lsR)); _dkFromCache = true; }
     if (_T.length) _renderDashFromLocal('', '', '');
+    // Nếu đang xem bảng đấu → render ngay từ _M local
+    if (_curGiaiId && _curNd && document.getElementById('tv-nd')?.style.display !== 'none') {
+      renderBangList(_curGiaiId, _curNd);
+    }
   } catch(e) {}
 
   // Tải dữ liệu nền (non-blocking — chạy nền, UI không chờ)
@@ -3438,17 +3442,34 @@ async function prefetchAll() {
     }
     if (mRes.rows?.length > 1) {
       const allRows = normalizeMatchRows(mRes.rows.slice(1));
-      _M = allRows;
-      // FIX v3: cache per giaiName
-      const giaiNames = [...new Set(allRows.map(r => String(r[0]||'')).filter(Boolean))];
-      giaiNames.forEach(gn => {
-        cacheSet('matches_' + gn, allRows.filter(r => String(r[0]||'') === gn));
+      // Smart merge: giữ tên đội local nếu GAS chưa sync
+      const localByKeyPF = {};
+      _M.forEach(m => {
+        const k = `${String(m[0]||'')}|${String(m[1]||'')}|${String(m[2]||'')}|${String(m[3]||'')}`;
+        localByKeyPF[k] = m;
       });
-      if (giaiParam) cacheSet('matches_' + giaiParam, allRows);
-      // Cập nhật localStorage ngay sau khi nhận data GAS
+      const mergedAll = allRows.map(nr => {
+        const k = `${String(nr[0]||'')}|${String(nr[1]||'')}|${String(nr[2]||'')}|${String(nr[3]||'')}`;
+        const local = localByKeyPF[k];
+        if (!local) return nr;
+        const merged = [...nr];
+        if (!merged[4] && local[4]) merged[4] = local[4];
+        if (!merged[7] && local[7]) merged[7] = local[7];
+        if ((merged[5]===''||merged[5]===null||merged[5]===undefined) && local[5]!==''&&local[5]!==null&&local[5]!==undefined) merged[5]=local[5];
+        if ((merged[6]===''||merged[6]===null||merged[6]===undefined) && local[6]!==''&&local[6]!==null&&local[6]!==undefined) merged[6]=local[6];
+        return merged;
+      });
+      _M = mergedAll;
+      // Cache per giaiName
+      const giaiNames = [...new Set(mergedAll.map(r => String(r[0]||'')).filter(Boolean))];
+      giaiNames.forEach(gn => {
+        cacheSet('matches_' + gn, mergedAll.filter(r => String(r[0]||'') === gn));
+      });
+      if (giaiParam) cacheSet('matches_' + giaiParam, mergedAll);
+      // Cập nhật localStorage
       try {
         const _lsMKeyNow = 'pb_adm_M_' + CODE;
-        localStorage.setItem(_lsMKeyNow, JSON.stringify(allRows));
+        localStorage.setItem(_lsMKeyNow, JSON.stringify(mergedAll));
       } catch(e) {}
     }
     if (rRes.rows?.length > 1) {
@@ -4083,9 +4104,27 @@ async function loadDash() {
     // Cập nhật _M nếu có data mới
     if (mRes?.rows?.length > 1) {
       const newRows = normalizeMatchRows(mRes.rows.slice(1));
-      cacheSet(cKeyM, newRows);
+      // Smart merge: giữ tên đội local BK/CK chưa sync GAS
+      const _lkDash = {};
+      _M.filter(m => String(m[0]||'') === giaiName)
+        .forEach(m => {
+          const k = `${String(m[1]||'')}|${String(m[2]||'')}|${String(m[3]||'')}`;
+          _lkDash[k] = m;
+        });
+      const merged__lkDash = newRows.map(nr => {
+        const k = `${String(nr[1]||'')}|${String(nr[2]||'')}|${String(nr[3]||'')}`;
+        const loc = _lkDash[k];
+        if (!loc) return nr;
+        const mg = [...nr];
+        if (!mg[4] && loc[4]) mg[4] = loc[4];
+        if (!mg[7] && loc[7]) mg[7] = loc[7];
+        if ((mg[5]===''||mg[5]===null||mg[5]===undefined) && loc[5]!==''&&loc[5]!==null&&loc[5]!==undefined) mg[5]=loc[5];
+        if ((mg[6]===''||mg[6]===null||mg[6]===undefined) && loc[6]!==''&&loc[6]!==null&&loc[6]!==undefined) mg[6]=loc[6];
+        return mg;
+      });
+      cacheSet(cKeyM, merged__lkDash);
       const others = _M.filter(m => String(m[0]||'') !== giaiName);
-      _M = [...others, ...newRows];
+      _M = [...others, ...merged__lkDash];
       dedupM();
     } else if (cachedM && !_M.some(m => String(m[0]||'') === giaiName)) {
       _M = [..._M, ...cachedM];
@@ -6299,12 +6338,12 @@ async function _ndBkRender() {
   }
 
   if (hasCacheData && ndChanged) {
-    // Đổi nội dung nhưng data đã có → render ngay rồi fetch ngầm để refresh
+    // Đổi nội dung nhưng data đã có → render ngay rồi smart-merge từ GAS nền
     _renderNow();
-    // Fetch ngầm (background) để cập nhật kết quả mới nhất
+    // Fetch ngầm: smart merge GAS + local, re-render nếu có thay đổi thực
     loadMatchesCache(_bkGiai, true).then(() => {
-      // Re-render nếu user vẫn đang ở nội dung này
       if (_bkGiai === (_curGiaiId || _bkGiai) && _bkNd === (_curNd || _bkNd)) {
+        // Chỉ re-render nếu tree cần rebuild (có data mới)
         _bkCurrentTree = null;
         _renderNow();
       }
@@ -6327,10 +6366,11 @@ async function ndBkRefresh() {
   _bkGiaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
   const btn = document.getElementById('nd-bk-refresh-btn');
   if (btn) { btn.textContent='⏳...'; btn.disabled=true; }
-  _invalidateMatchCache(_bkGiai);
+  // Không invalidate cache — chỉ force refresh để merge GAS + local
+  // Invalidate sẽ xóa cache local dẫn đến mất tên đội BK/CK chưa push GAS
   _bkCurrentTree = null;
   try {
-    await loadMatchesCache(_bkGiai, true);
+    await loadMatchesCache(_bkGiai, true); // forceRefresh=true: fetch GAS nhưng smart merge
     await _ndBkRender();
     // Cũng re-render bảng đấu nếu đang ở tab đó
     if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
@@ -8243,9 +8283,26 @@ async function loadMatchesCache(giaiId='', forceRefresh=false) {
   // Dùng cache nếu còn mới VÀ không bị force refresh
   const cached = forceRefresh ? null : cacheGet(cKey);
   if (cached) {
-    // Thay thế hoàn toàn dữ liệu của giải này trong _M (chỉ theo giaiName)
+    // Smart merge với cache (giống GAS merge — giữ tên đội local nếu cache thiếu)
+    const localByKey2 = {};
+    _M.filter(m => String(m[0]||'') === giaiName)
+      .forEach(m => {
+        const k = `${String(m[1]||'')}|${String(m[2]||'')}|${String(m[3]||'')}`;
+        localByKey2[k] = m;
+      });
+    const mergedCache = cached.map(nr => {
+      const k = `${String(nr[1]||'')}|${String(nr[2]||'')}|${String(nr[3]||'')}`;
+      const local = localByKey2[k];
+      if (!local) return nr;
+      const merged = [...nr];
+      if (!merged[4] && local[4]) merged[4] = local[4];
+      if (!merged[7] && local[7]) merged[7] = local[7];
+      if ((merged[5]===''||merged[5]===null||merged[5]===undefined) && local[5]!==''&&local[5]!==null&&local[5]!==undefined) merged[5]=local[5];
+      if ((merged[6]===''||merged[6]===null||merged[6]===undefined) && local[6]!==''&&local[6]!==null&&local[6]!==undefined) merged[6]=local[6];
+      return merged;
+    });
     const others = _M.filter(m => String(m[0]||'') !== giaiName);
-    _M = [...others, ...cached];
+    _M = [...others, ...mergedCache];
     dedupM();
     return;
   }
@@ -8260,16 +8317,38 @@ async function loadMatchesCache(giaiId='', forceRefresh=false) {
 
     if (md.rows?.length > 1) {
       const newRows = normalizeMatchRows(md.rows.slice(1));
-      cacheSet(cKey, newRows);
-      // REPLACE theo giaiName (GSheets luôn lưu tên)
+      // SMART MERGE: GAS là nguồn chính nhưng giữ tên đội local nếu GAS chưa sync
+      // Trường hợp: _bkAutoSyncToSchedule đã điền BK/CK local nhưng chưa push GAS xong
+      const localByKey = {};
+      _M.filter(m => String(m[0]||'') === giaiName)
+        .forEach(m => {
+          const k = `${String(m[1]||'')}|${String(m[2]||'')}|${String(m[3]||'')}`;
+          localByKey[k] = m;
+        });
+
+      const mergedRows = newRows.map(nr => {
+        const k = `${String(nr[1]||'')}|${String(nr[2]||'')}|${String(nr[3]||'')}`;
+        const local = localByKey[k];
+        if (!local) return nr;
+        const merged = [...nr];
+        // Giữ tên đội local nếu GAS trả về rỗng (chưa sync)
+        if (!merged[4] && local[4]) merged[4] = local[4]; // teamA
+        if (!merged[7] && local[7]) merged[7] = local[7]; // teamB
+        // Giữ scores local nếu GAS chưa có (trường hợp đang live)
+        if ((merged[5]===''||merged[5]===null||merged[5]===undefined) && local[5]!=='' && local[5]!==null && local[5]!==undefined) merged[5] = local[5];
+        if ((merged[6]===''||merged[6]===null||merged[6]===undefined) && local[6]!=='' && local[6]!==null && local[6]!==undefined) merged[6] = local[6];
+        return merged;
+      });
+
+      cacheSet(cKey, mergedRows);
       const others = _M.filter(m => String(m[0]||'') !== giaiName);
-      _M = [...others, ...newRows];
+      _M = [...others, ...mergedRows];
     }
     if (rd.rows?.length > 1) buildDkFromResults(rd.rows.slice(1));
     if (ld.rows?.length > 1) {
       _buildLiveFromRows(ld.rows.slice(1));
     }
-    dedupM(); // Safety net
+    dedupM();
     console.log('[loadMatchesCache] giaiName:', giaiName, '→ M:', _M.length, 'done:', _dkBangCode.size);
   } catch(e) {
     console.error('[loadMatchesCache]', e.message);
@@ -11048,28 +11127,27 @@ async function _bkDoSyncToSchedule() {
     if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
   }
 
-  // Cập nhật cache matches
+  // Cập nhật cache + localStorage ngay để loadMatchesCache tiếp theo dùng data có tên đội
   const cKey = 'matches_' + giaiName;
-  const cached = _M.filter(m => String(m[0]||'') === giaiName);
-  cacheSet(cKey, cached);
+  const cachedRows = _M.filter(m => String(m[0]||'') === giaiName);
+  cacheSet(cKey, cachedRows);
+  try { localStorage.setItem('pb_adm_M_' + CODE, JSON.stringify(_M)); } catch(e) {}
 
-  // Push lên GAS nền chỉ khi auto mode bật
-  if (_bkAutoMode) {
-    const pushToGas = async () => {
-      for (const { row, code } of toUpdate) {
-        try {
-          await gPost({ action:'updateMatch', adminCode:CODE,
-            giai:giaiName, giaiName, bang:String(row[2]||''), code, row });
-        } catch(e) {}
-      }
-      // Cập nhật LS sau khi push xong
-      try {
-        const cached2 = _M.filter(m => String(m[0]||'') === giaiName);
-        localStorage.setItem('pb_adm_M_' + CODE, JSON.stringify(cached2));
-      } catch(e) {}
-    };
-    pushToGas().catch(() => {});
-  }
+  // Cập nhật cache GAS: push song song (không await để không block UI)
+  // Dù autoMode hay không, vẫn push để GAS và local đồng bộ
+  (async () => {
+    const results = await Promise.allSettled(
+      toUpdate.map(({ row, code }) =>
+        gPost({ action:'updateMatch', adminCode:CODE,
+          giai:giaiName, giaiName, bang:String(row[2]||''), code, row })
+      )
+    );
+    // Cập nhật cache và LS sau khi tất cả push xong
+    const cKeySync = 'matches_' + giaiName;
+    const rowsSync = _M.filter(m => String(m[0]||'') === giaiName);
+    cacheSet(cKeySync, rowsSync);
+    try { localStorage.setItem('pb_adm_M_' + CODE, JSON.stringify(_M)); } catch(e) {}
+  })().catch(() => {});
 }
 
 // Gọi sau bkRender để cập nhật seeding panel
@@ -13235,14 +13313,31 @@ async function loadMatches() {
     if (md.rows?.length > 1) {
       const newRows = normalizeMatchRows(md.rows.slice(1));
       if (giaiName) {
-        // Merge: giữ các giải khác, thay thế giải đang load
+        // Smart merge: giữ tên đội local BK/CK chưa sync GAS
+      const _lk13 = {};
+      _M.filter(m => String(m[0]||'') === giaiName)
+        .forEach(m => {
+          const k = `${String(m[1]||'')}|${String(m[2]||'')}|${String(m[3]||'')}`;
+          _lk13[k] = m;
+        });
+      const merged__lk13 = newRows.map(nr => {
+        const k = `${String(nr[1]||'')}|${String(nr[2]||'')}|${String(nr[3]||'')}`;
+        const loc = _lk13[k];
+        if (!loc) return nr;
+        const mg = [...nr];
+        if (!mg[4] && loc[4]) mg[4] = loc[4];
+        if (!mg[7] && loc[7]) mg[7] = loc[7];
+        if ((mg[5]===''||mg[5]===null||mg[5]===undefined) && loc[5]!==''&&loc[5]!==null&&loc[5]!==undefined) mg[5]=loc[5];
+        if ((mg[6]===''||mg[6]===null||mg[6]===undefined) && loc[6]!==''&&loc[6]!==null&&loc[6]!==undefined) mg[6]=loc[6];
+        return mg;
+      });
         const others = _M.filter(m => String(m[0]||'') !== giaiName);
-        _M = [...others, ...newRows];
+        _M = [...others, ...merged__lk13];
         dedupM();
+        cacheSet('matches_' + giaiName, merged__lk13);
       } else {
         _M = newRows;
       }
-      if (giaiName) cacheSet('matches_' + giaiName, newRows);
     }
     buildDkFromResults(rd.rows?.slice(1)||[]);
     _buildLiveFromRows((ld.rows?.slice(1)||[]));
