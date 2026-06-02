@@ -4,7 +4,7 @@
 <!-- Pickleball v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v2.22 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v2.3 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -3105,9 +3105,22 @@ function showApp() {
         }
       }
     }
-    // _M không restore từ localStorage — matches thay đổi thường xuyên (xóa/thêm/kết quả)
-    // → luôn fetch từ GAS để tránh hiện trận đã xóa sau reload
-    // if (lsM) { _M = JSON.parse(lsM); dedupM(); }
+    // Restore _M từ localStorage để render ngay — GAS sẽ sync và overwrite sau
+    // Dùng versioned key (CODE) để tránh stale từ deployment khác
+    const lsMKey = 'pb_adm_M_' + CODE;
+    const lsM2 = localStorage.getItem(lsMKey);
+    if (lsM2) {
+      try {
+        const cachedM = JSON.parse(lsM2);
+        if (Array.isArray(cachedM) && cachedM.length > 0) {
+          _M = normalizeMatchRows(cachedM);
+          dedupM();
+          // Build cache per giai ngay
+          const giaiNames2 = [...new Set(_M.map(r=>String(r[0]||'')).filter(Boolean))];
+          giaiNames2.forEach(gn => cacheSet('matches_'+gn, _M.filter(r=>String(r[0]||'')===gn)));
+        }
+      } catch(e) {}
+    }
     if (lsR) { buildDkFromResults(JSON.parse(lsR)); _dkFromCache = true; }
     if (_T.length) _renderDashFromLocal('', '', '');
   } catch(e) {}
@@ -3206,7 +3219,8 @@ function _invalidateMatchCache(giaiId) {
   _cacheVer++;
   if (giaiName) cacheDel('matches_' + giaiName);
   if (giaiId && giaiId !== giaiName) cacheDel('matches_' + giaiId);
-  // Xóa luôn localStorage _M để reload không load data cũ
+  // Xóa localStorage _M để reload tiếp theo fetch fresh từ GAS
+  // (thay vì dùng stale data sau khi admin đã thay đổi)
   try {
     localStorage.removeItem('pb_adm_M_' + CODE);
     localStorage.removeItem('pb_adm_M');
@@ -3338,13 +3352,17 @@ async function prefetchAll() {
     if (mRes.rows?.length > 1) {
       const allRows = normalizeMatchRows(mRes.rows.slice(1));
       _M = allRows;
-      // FIX v3: cache per giaiName (bỏ key 'matches_' rỗng gây miss lookup)
+      // FIX v3: cache per giaiName
       const giaiNames = [...new Set(allRows.map(r => String(r[0]||'')).filter(Boolean))];
       giaiNames.forEach(gn => {
         cacheSet('matches_' + gn, allRows.filter(r => String(r[0]||'') === gn));
       });
-      // Cũng set key giaiParam để backward compat (manager filter)
       if (giaiParam) cacheSet('matches_' + giaiParam, allRows);
+      // Cập nhật localStorage ngay sau khi nhận data GAS
+      try {
+        const _lsMKeyNow = 'pb_adm_M_' + CODE;
+        localStorage.setItem(_lsMKeyNow, JSON.stringify(allRows));
+      } catch(e) {}
     }
     if (rRes.rows?.length > 1) {
       buildDkFromResults(rRes.rows.slice(1));
@@ -3382,8 +3400,11 @@ async function prefetchAll() {
       const _lsCacheKey = 'pb_adm_T_' + CODE;
       const _lsMKey     = 'pb_adm_M_' + CODE;
       if (_T.length) localStorage.setItem(_lsCacheKey, JSON.stringify(_T));
-      // _M không lưu localStorage — tránh stale sau xóa/thêm trận
-      // if (_M.length) localStorage.setItem(_lsMKey, JSON.stringify(_M));
+      // Lưu _M vào localStorage để restore instant trên reload
+      // GAS sẽ overwrite _M ngay sau khi load → không stale lâu
+      if (_M.length) {
+        try { localStorage.setItem(_lsMKey, JSON.stringify(_M)); } catch(e) {}
+      }
       // Lưu _R (KetQua rows) cho buildDkFromResults
       const cachedR2 = cacheGet('results_' + (ROLE==='manager'?MY_GIAI:''));
       if (cachedR2?.length) {
@@ -9487,6 +9508,8 @@ function bkRender() {
   // Cập nhật seeding panel
   const { seeds: _sp_seeds, bangs: _sp_bangs, bangDone: _sp_bd } = _bkCalcSeeds(_bkGiai, _bkNd);
   _bkUpdateSeedPanel(tree, _sp_seeds, _sp_bangs, _sp_bd);
+  // Auto-sync tree teams → _M + bảng đấu (nếu đang ở auto mode)
+  _bkAutoSyncToSchedule();
   // Auto fit zoom sau render
   if (typeof bkAutoFitOnRender === 'function') bkAutoFitOnRender();
   // Sync thanh cuộn ngang sau khi render
@@ -10878,6 +10901,89 @@ let _bkCurrentTree = null;
 let _bkAutoMode = false;  // true = tự động điền khi có KQ, false = thủ công
 let _bkEditMode = false;  // true = đang chỉnh sửa thủ công, tạm dừng auto
 let _bkAutoModeBeforeEdit = false; // lưu trạng thái auto trước khi edit
+
+
+// ── Auto-sync: sau mỗi bkRender, cập nhật tên đội từ tree vào _M + re-render bảng đấu ──
+// Chạy debounce 300ms để không spam khi bkRender gọi liên tiếp
+let _bkSyncTimer = null;
+function _bkAutoSyncToSchedule() {
+  // Sync khi auto mode bật, hoặc khi không ở edit mode (cập nhật _M local để bảng đấu đúng)
+  if (_bkEditMode) return;
+  if (_bkSyncTimer) clearTimeout(_bkSyncTimer);
+  _bkSyncTimer = setTimeout(async () => {
+    await _bkDoSyncToSchedule();
+  }, 300);
+}
+
+async function _bkDoSyncToSchedule() {
+  const tree = _bkCurrentTree;
+  if (!tree || !_bkGiai || !_bkNd) return;
+
+  const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
+  const allM  = _M.filter(m => String(m[0]||'')===giaiName && String(m[1]||'')===_bkNd);
+  const koByCode = {};
+  allM.filter(m => { const v=String(m[9]||''); return v&&v!=='Vòng bảng'&&!v.includes('bảng'); })
+      .forEach(m => { koByCode[String(m[3]||'')] = m; });
+
+  const toUpdate = []; // [{ row, code }]
+
+  for (const round of tree.rounds) {
+    for (const m of round.matches) {
+      if (m.isByeA && m.isByeB) continue;
+      const tA = m.isByeA ? '' : (m.teamA || '');
+      const tB = m.isByeB ? '' : (m.teamB || '');
+      if (!tA && !tB) continue; // cả 2 chưa resolve
+
+      const existing = koByCode[m.code];
+      if (!existing) continue; // trận chưa tồn tại trong _M → bỏ qua (bkAutoFill sẽ tạo)
+
+      const curA = String(existing[4]||''), curB = String(existing[7]||'');
+      const updateA = tA && tA !== 'TBD' && tA !== curA;
+      const updateB = tB && tB !== 'TBD' && tB !== curB;
+      if (!updateA && !updateB) continue;
+
+      const newRow = [...existing];
+      if (updateA) newRow[4] = tA;
+      if (updateB) newRow[7] = tB;
+      // Cập nhật _M local ngay
+      const idx = _M.indexOf(existing);
+      if (idx >= 0) _M[idx] = normalizeMatchRow(newRow);
+      else { _M.push(normalizeMatchRow(newRow)); dedupM(); }
+      toUpdate.push({ row: newRow, code: m.code });
+    }
+  }
+
+  if (!toUpdate.length) return;
+
+  // Re-render bảng đấu ngay (local đã update)
+  if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
+    const tvNd = document.getElementById('tv-nd');
+    if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
+  }
+
+  // Cập nhật cache matches
+  const cKey = 'matches_' + giaiName;
+  const cached = _M.filter(m => String(m[0]||'') === giaiName);
+  cacheSet(cKey, cached);
+
+  // Push lên GAS nền chỉ khi auto mode bật
+  if (_bkAutoMode) {
+    const pushToGas = async () => {
+      for (const { row, code } of toUpdate) {
+        try {
+          await gPost({ action:'updateMatch', adminCode:CODE,
+            giai:giaiName, giaiName, bang:String(row[2]||''), code, row });
+        } catch(e) {}
+      }
+      // Cập nhật LS sau khi push xong
+      try {
+        const cached2 = _M.filter(m => String(m[0]||'') === giaiName);
+        localStorage.setItem('pb_adm_M_' + CODE, JSON.stringify(cached2));
+      } catch(e) {}
+    };
+    pushToGas().catch(() => {});
+  }
+}
 
 // Gọi sau bkRender để cập nhật seeding panel
 function _bkUpdateSeedPanel(tree, seeds, bangs, bangDone) {
