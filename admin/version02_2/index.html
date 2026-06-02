@@ -4,7 +4,7 @@
 <!-- Pickleball v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v2.21 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v2.22 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -6148,7 +6148,7 @@ async function confirmGenerateSchedule() {
 
 
 // ── Render cây thi đấu vào nd-bk-wrap (dùng ID swap) ──
-// async: luôn await loadMatchesCache để đảm bảo đúng match data trước khi render
+// v2: render ngay từ cache → nhanh, rồi fetch ngầm nếu data cũ/đổi nội dung
 async function _ndBkRender() {
   const prevGiai = _bkGiai, prevNd = _bkNd;
   _bkGiai = _curGiaiId || _bkGiai;
@@ -6162,34 +6162,54 @@ async function _ndBkRender() {
     return;
   }
 
-  // Xóa cache tree khi đổi giải/nội dung — buộc build lại từ data mới
   const ndChanged = (prevGiai !== _bkGiai || prevNd !== _bkNd);
-  if (ndChanged) {
-    _bkCurrentTree = null;
-    // Hiện loading ngay, tránh show cây cũ
-    ndWrap.innerHTML = '<div class="empty"><div class="ei">⏳</div><p>Đang tải cây thi đấu…</p></div>';
-  }
+  if (ndChanged) _bkCurrentTree = null;
 
   _bkOverrides = _bkLoadOverrides();
   _bkSaveState();
 
-  // Load đúng match data cho giải/nội dung hiện tại trước khi render
-  // forceRefresh=true khi đổi nội dung để không dùng cache data cũ của nội dung khác
-  try {
-    await loadMatchesCache(_bkGiai, ndChanged);
-  } catch(e) { /* tiếp tục với data hiện có nếu lỗi mạng */ }
+  // Helper: vẽ cây vào ndWrap ngay lập tức
+  const _renderNow = () => {
+    const realWrap = document.getElementById('bk-wrap');
+    if (realWrap) realWrap.id = '_bk_swap_hidden';
+    ndWrap.id = 'bk-wrap';
+    try { bkRender(); }
+    finally {
+      ndWrap.id = 'nd-bk-wrap';
+      if (realWrap) realWrap.id = 'bk-wrap';
+    }
+    setTimeout(_syncBkScrollbar, 80);
+  };
 
-  // Swap IDs: nd-bk-wrap ↔ bk-wrap để bkRender ghi vào đúng element
-  const realWrap = document.getElementById('bk-wrap');
-  if (realWrap) realWrap.id = '_bk_swap_hidden';
-  ndWrap.id = 'bk-wrap';
-  try {
-    bkRender();
-  } finally {
-    ndWrap.id = 'nd-bk-wrap';
-    if (realWrap) realWrap.id = 'bk-wrap';
+  const giaiName = _bkGiaiName || _resolveGiaiName(_bkGiai) || _bkGiai;
+  const hasCacheData = _M.some(m => String(m[0]||'') === giaiName && String(m[1]||'') === _bkNd);
+
+  if (hasCacheData && !ndChanged) {
+    // DATA ĐÃ CÓ TRONG MEMORY → render ngay, không cần network
+    _renderNow();
+    return;
   }
-  setTimeout(_syncBkScrollbar, 120);
+
+  if (hasCacheData && ndChanged) {
+    // Đổi nội dung nhưng data đã có → render ngay rồi fetch ngầm để refresh
+    _renderNow();
+    // Fetch ngầm (background) để cập nhật kết quả mới nhất
+    loadMatchesCache(_bkGiai, true).then(() => {
+      // Re-render nếu user vẫn đang ở nội dung này
+      if (_bkGiai === (_curGiaiId || _bkGiai) && _bkNd === (_curNd || _bkNd)) {
+        _bkCurrentTree = null;
+        _renderNow();
+      }
+    }).catch(() => {});
+    return;
+  }
+
+  // Chưa có data → phải fetch trước, hiện loading state
+  ndWrap.innerHTML = '<div class="empty"><div class="ei">⏳</div><p>Đang tải cây thi đấu…</p></div>';
+  try {
+    await loadMatchesCache(_bkGiai, true);
+  } catch(e) { /* tiếp tục với data hiện có */ }
+  _renderNow();
 }
 
 // ── ndBk action wrappers ──
@@ -6199,11 +6219,16 @@ async function ndBkRefresh() {
   _bkGiaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
   const btn = document.getElementById('nd-bk-refresh-btn');
   if (btn) { btn.textContent='⏳...'; btn.disabled=true; }
-  // Invalidate cache → _ndBkRender sẽ tự gọi loadMatchesCache(forceRefresh=true)
   _invalidateMatchCache(_bkGiai);
   _bkCurrentTree = null;
   try {
+    await loadMatchesCache(_bkGiai, true);
     await _ndBkRender();
+    // Cũng re-render bảng đấu nếu đang ở tab đó
+    if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
+      const tvNd = document.getElementById('tv-nd');
+      if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
+    }
   } finally {
     if (btn) { btn.textContent='↻ Làm mới'; btn.disabled=false; }
   }
@@ -9577,6 +9602,11 @@ async function ndBkApplyFull() {
       _bkStartAutoPolling();
     }
     _ndBkUpdateToolbarUI();
+    // Render bảng đấu ngay nếu đang ở tab bảng đấu
+    if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
+      const tvNd = document.getElementById('tv-nd');
+      if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
+    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '⚡ Áp dụng & Tạo lịch'; }
   }
@@ -9783,6 +9813,23 @@ async function _bkAutoAdvanceIfNeeded() {
     // 5. Có kết quả mới → tự điền + apply GAS
     toast('🤖 Có kết quả mới — tự động điền vòng tiếp...', 'in');
     await bkAutoFill();
+    // Sau khi autoFill: re-render bảng đấu nếu đang ở tab bảng đấu
+    if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
+      const tvNd = document.getElementById('tv-nd');
+      if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
+    }
+    // Re-render cây nếu đang ở tab cây thi đấu
+    const ndWrap = document.getElementById('nd-bk-wrap');
+    if (ndWrap && ndWrap.offsetParent !== null) {
+      _bkCurrentTree = null;
+      const realWrap = document.getElementById('bk-wrap');
+      if (realWrap) realWrap.id = '_bk_swap_hidden';
+      ndWrap.id = 'bk-wrap';
+      try { bkRender(); } finally {
+        ndWrap.id = 'nd-bk-wrap';
+        if (realWrap) realWrap.id = 'bk-wrap';
+      }
+    }
 
   } catch(e) {
     console.warn('[bkAutoAdvance]', e.message);
@@ -9896,8 +9943,13 @@ async function bkAutoFill() {
           toCreate.push([giaiName, _bkNd, roundLabel, m.code, tA, '', '', tB, '', roundLabel, '']);
         } else {
           const curA = String(existing[4]||''), curB = String(existing[7]||'');
-          if (tA !== curA || tB !== curB) {
-            const r2 = [...existing]; r2[4]=tA; r2[7]=tB;
+          // Luôn update nếu tree có tên đội mới (tA/tB khác '' và khác hiện tại)
+          const shouldUpdateA = tA && tA !== 'TBD' && tA !== curA;
+          const shouldUpdateB = tB && tB !== 'TBD' && tB !== curB;
+          if (shouldUpdateA || shouldUpdateB) {
+            const r2 = [...existing];
+            if (shouldUpdateA) r2[4] = tA;
+            if (shouldUpdateB) r2[7] = tB;
             toUpdate.push({ row: r2, code: m.code });
           }
         }
@@ -9959,15 +10011,41 @@ async function bkAutoFill() {
       });
     }
 
-    // 6. Reload matches + re-render cây và bảng đấu
-    _invalidateMatchCache(_bkGiai);
-    await loadMatchesCache(_bkGiai, true);
+    // 6. Cập nhật _M local ngay (không cần đợi GAS reload)
+    // toCreate đã push vào _M ở bước 4; toUpdate cần patch thêm
+    toUpdate.forEach(({ row }) => {
+      const idx = _M.findIndex(m =>
+        String(m[0]||'') === giaiName &&
+        String(m[1]||'') === _bkNd &&
+        String(m[3]||'') === String(row[3]||'')
+      );
+      if (idx >= 0) _M[idx] = normalizeMatchRow(row);
+      else { _M.push(normalizeMatchRow(row)); dedupM(); }
+    });
+
+    // Cập nhật cache với _M đã patch (tránh lần sau loadMatchesCache trả về data cũ)
+    const giaiNameForCache = giaiName;
+    const newCachedRows = _M.filter(m => String(m[0]||'') === giaiNameForCache);
+    cacheSet('matches_' + giaiNameForCache, newCachedRows);
+
+    // Re-render cây ngay từ _M đã cập nhật
     bkRender();
-    // Nếu đang ở tab bảng đấu của nội dung này → render luôn
+
+    // Nếu đang ở tab bảng đấu của nội dung này → render danh sách trận ngay
     if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
       const tvNd = document.getElementById('tv-nd');
       if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
     }
+
+    // Fetch ngầm để sync GSheets → local (không block UI)
+    _invalidateMatchCache(_bkGiai);
+    loadMatchesCache(_bkGiai, true).then(() => {
+      bkRender();
+      if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
+        const tvNd2 = document.getElementById('tv-nd');
+        if (tvNd2 && tvNd2.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
+      }
+    }).catch(() => {});
 
     const total = toCreate.length + toUpdate.length;
     if (toCreate.length && toUpdate.length)
