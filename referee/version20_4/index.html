@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- Pickleball v8.5 2026-06-03: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
+<!-- Pickleball v8.6 2026-06-03: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
 <meta charset="UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>v2.41 - Da Nang Referee v17 – Pickleball</title>
+<title>v2.4 - Da Nang Referee v17 – Pickleball</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -2426,6 +2426,45 @@ try { S.results = JSON.parse(localStorage.getItem('pb_res6')||'{}'); } catch(e){
 let evLog = [];
 try { evLog = JSON.parse(localStorage.getItem('pb_ev6')||'[]'); } catch(e){}
 
+// ── Auto-cleanup: TTL + cap để tránh tích lũy dữ liệu cũ ──────────────────
+// Kết quả: giữ tối đa 1 ngày / 100 trận — xong giải là sạch
+// Nhật ký: giữ tối đa 12 giờ / 300 sự kiện — chỉ cần trong ngày thi đấu
+(function _autoCleanup() {
+  const now  = Date.now();
+  const DAY  = 24 * 60 * 60 * 1000;
+  const HALF = 12 * 60 * 60 * 1000;
+  const CAP_RES = 100;  // tối đa 100 kết quả
+  const CAP_EV  = 300;  // tối đa 300 sự kiện
+
+  // Kết quả: xóa nếu savedAt cũ hơn 1 ngày
+  let resChanged = false;
+  Object.keys(S.results).forEach(k => {
+    const savedAt = S.results[k]?.savedAt;
+    if (savedAt) {
+      // savedAt dạng "HH:MM:SS DD/MM/YYYY" — dùng Date.parse nếu có timestamp ms
+      const ts = S.results[k]?.savedAtMs || 0;
+      if (ts && (now - ts) > DAY) { delete S.results[k]; resChanged = true; }
+    }
+  });
+  // Cap: chỉ giữ 100 kết quả mới nhất (theo savedAtMs)
+  const resEntries = Object.entries(S.results);
+  if (resEntries.length > CAP_RES) {
+    resEntries.sort((a,b) => (b[1].savedAtMs||0) - (a[1].savedAtMs||0));
+    resEntries.slice(CAP_RES).forEach(([k]) => { delete S.results[k]; });
+    resChanged = true;
+  }
+  if (resChanged) try { localStorage.setItem('pb_res6', JSON.stringify(S.results)); } catch(e){}
+
+  // Nhật ký: chỉ giữ 300 sự kiện gần nhất, xóa sự kiện cũ hơn 12 giờ
+  const before = evLog.length;
+  evLog = evLog.filter(e => {
+    const ts = e.tsMs || 0;
+    return !ts || (now - ts) <= HALF;
+  });
+  if (evLog.length > CAP_EV) evLog = evLog.slice(-CAP_EV);
+  if (evLog.length !== before) try { localStorage.setItem('pb_ev6', JSON.stringify(evLog)); } catch(e){}
+})();
+
 // ── Lưu / Khôi phục trận đang chấm điểm vào localStorage ──────
 const _SAV_KEY = 'pb_active7';
 
@@ -3484,13 +3523,15 @@ async function finishLiveGS(m, scoreA, scoreB) {
 function pushLog(desc, snap) {
   const s = snap ? JSON.parse(snap) : {a:S.a, b:S.b};
   evLog.push({
-    time: now(), desc,
+    time: now(), tsMs: Date.now(), desc,
     score: `${s.a}–${s.b}`,
     ref: S.currentMatch?.code || '',
     noidung: S.currentMatch?.noidung || '',
     bang: S.currentMatch?.bang || '',
     game: S.game,
   });
+  // Cap realtime: không để evLog vượt 300 entry
+  if (evLog.length > 300) evLog = evLog.slice(-300);
   try { localStorage.setItem('pb_ev6', JSON.stringify(evLog)); } catch(e) {}
   renderHistory();
 }
@@ -3582,12 +3623,12 @@ function confirmSave() {
                : 'Hoà';
 
   const entry = {
-    savedAt: now(), code: m.code, noidung: m.noidung, bang: m.bang,
+    savedAt: now(), savedAtMs: Date.now(), code: m.code, noidung: m.noidung, bang: m.bang,
     giai: m.giai||'',
-    teamA:  origTeamA,   // luôn là đội A gốc từ Matches
-    teamB:  origTeamB,   // luôn là đội B gốc từ Matches
-    scoreA: scoreOrig_A, // điểm đội A gốc
-    scoreB: scoreOrig_B, // điểm đội B gốc
+    teamA:  origTeamA,
+    teamB:  origTeamB,
+    scoreA: scoreOrig_A,
+    scoreB: scoreOrig_B,
     winner, court, referee: ref,
     winRule: RULES[winRule].label,
   };
