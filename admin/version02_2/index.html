@@ -4,7 +4,7 @@
 <!-- Pickleball v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v02.2 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v2_2 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -2540,22 +2540,18 @@ function _buildLiveFromRows(rows) {
     const nd   = parts[0];
     const bang = parts[1];
     const code = parts.slice(2).join('|');
-    const bc   = `${nd}|${bang}|${code}`; // noidung|bang|code — khớp với key mới của _dkBangCode
     // Tìm giải từ _liveScores hoặc _M
     const ls = newLS[liveKey];
     const matchInM = _M.find(m => String(m[1]||'')===nd && String(m[2]||'')===bang && String(m[3]||'')===code);
     const giai = (matchInM ? String(matchInM[0]||'') : '');
+    const bc = `${giai}|${nd}|${bang}|${code}`; // giai|noidung|bang|code — đầy đủ
 
     // Xóa khỏi _dK
     if (giai) _dK.delete(`${giai}|${bang}|${code}`);
 
     // Xóa khỏi _dkBangCode Map
-    if (_dkBangCode instanceof Map && _dkBangCode.has(bc)) {
-      if (giai) {
-        const giaiSet = _dkBangCode.get(bc);
-        giaiSet && giaiSet.delete(giai);
-        if (giaiSet && giaiSet.size === 0) _dkBangCode.delete(bc);
-      }
+    if (giai && _dkBangCode instanceof Map && _dkBangCode.has(bc)) {
+      _dkBangCode.delete(bc);
     }
 
     // Xóa matchScoreA/B trong _M để card không bị force done
@@ -2587,8 +2583,8 @@ async function _syncFinishedMatches(finishedKeys) {
       );
       if (!m) return;
       const giai = String(m[0]||'').trim();
-      const scoreEntry = _dkScores[`${giai}|${bang}|${code}`]
-                      || _dkScores[`${bang}|${code}`];
+      // KHÔNG dùng fallback `bang|code` — sẽ lấy nhầm tỉ số giải/nội dung khác
+      const scoreEntry = _dkScores[`${giai}|${bang}|${code}`];
       if (scoreEntry) {
         // Cập nhật _M cache với scores từ KetQua
         const mIdx = _M.indexOf(m);
@@ -2633,8 +2629,8 @@ function buildDkFromResults(rRows) {
     if (!bg || !cd) return;
     // Thêm key đầy đủ (tên giải|bang|code)
     dkSet.add(`${g}|${bg}|${cd}`);
-    // Key Map bao gồm noidung để tránh kết quả nội dung khác (Đôi Nữ) làm ô nhiễm (Đôi Nam-Nữ)
-    const bcKey = `${nd}|${bg}|${cd}`;
+    // Key Map bao gồm cả giaiName + noidung để tránh kết quả giải/nội dung khác lẫn vào
+    const bcKey = `${g}|${nd}|${bg}|${cd}`;
     if (!bcSet.has(bcKey)) bcSet.set(bcKey, new Set());
     bcSet.get(bcKey).add(g);
     // Thêm key mã giải nếu có trong _T
@@ -2669,8 +2665,8 @@ function _syncResultCache(m, sA, sB, teamA, teamB, ref) {
   const nd  = String(m[1]||'').trim();
   const bg  = String(m[2]||'').trim();
   const cd  = String(m[3]||'').trim();
-  const bcKey   = nd + '|' + bg + '|' + cd;
-  const scoreKey = g  + '|' + bg + '|' + cd;
+  const bcKey   = g + '|' + nd + '|' + bg + '|' + cd; // giai|noidung|bang|code
+  const scoreKey = g + '|' + bg + '|' + cd;
   const tA  = teamA !== undefined ? String(teamA||'') : String(m[4]||'');
   const tB  = teamB !== undefined ? String(teamB||'') : String(m[7]||'');
   const rf  = ref   !== undefined ? String(ref||'')   : String(m[10]||'');
@@ -2701,7 +2697,7 @@ function _syncResultCache(m, sA, sB, teamA, teamB, ref) {
   } else {
     // Xóa điểm → xóa khỏi tất cả cache
     _dK.delete(scoreKey);
-    if (_dkBangCode instanceof Map) _dkBangCode.delete(bcKey);
+    if (_dkBangCode instanceof Map) _dkBangCode.delete(bcKey); // bcKey = giai|noidung|bang|code
     delete _dkScores[scoreKey];
     // Reset _M[5/6]
     const mIdx2 = _M.findIndex(r => String(r[0]||'')===g && String(r[1]||'')===nd && String(r[2]||'')===bg && String(r[3]||'')===cd);
@@ -2725,14 +2721,14 @@ function isMatchDone(m) {
   // Bỏ nhánh m[5]/m[6]: Matches col[5/6] chỉ là cache hiển thị, không dùng cho logic
   // Mọi hành động ghi điểm (TT lưu / admin sửa) đều cập nhật _dkBangCode qua _syncResultCache
   const nd = String(m[1]||'').trim();
-  const bc = `${nd}|${bg}|${cd}`;
+  const bc = `${g}|${nd}|${bg}|${cd}`; // giai|noidung|bang|code — đầy đủ để tránh lẫn giải/nội dung
   if (_dkBangCode instanceof Map) {
-    const giaiSet = _dkBangCode.get(bc);
-    if (giaiSet) {
-      if (giaiSet.has(g)) return true;
-      // Fallback: giaiId thay vì giaiName (data cũ có thể lưu mã)
-      const tById = _T.find(t => String(t[0]||'') === g);
-      if (tById && giaiSet.has(String(tById[1]||''))) return true;
+    if (_dkBangCode.has(bc)) return true;
+    // Fallback: giaiId thay vì giaiName (data cũ có thể lưu mã)
+    const tById = _T.find(t => String(t[0]||'') === g);
+    if (tById) {
+      const gName = String(tById[1]||'');
+      if (_dkBangCode.has(`${gName}|${nd}|${bg}|${cd}`)) return true;
     }
     return false;
   }
@@ -2747,7 +2743,8 @@ function getFinalScore(m) {
   // _dkScores được cập nhật ngay sau mọi hành động ghi điểm qua _syncResultCache
   const g   = String(m[0]||'').trim();
   const key = `${g}|${m[2]}|${m[3]}`;
-  const dkEntry = _dkScores[key] || _dkScores[`${m[2]}|${m[3]}`];
+  // KHÔNG dùng fallback `bang|code` — sẽ lấy nhầm tỉ số của giải/nội dung khác
+  const dkEntry = _dkScores[key];
   if (dkEntry) return dkEntry;
 
   // Fallback: Matches col[5/6] — dùng cho dữ liệu cũ chưa có trong _dkScores
@@ -4014,14 +4011,13 @@ async function loadDash() {
         d.recentResults.forEach(r => {
           if (!r || !r.bang || !r.code) return;
           const ndVal = String(r.nd||r.noidung||'').trim(); // noidung từ recentResults
-          const bc    = `${ndVal}|${String(r.bang)}|${String(r.code)}`; // noidung|bang|code
           const gName = String(r.giai||'').trim();
-          // ── FIX: _dkBangCode là Map → dùng get/set thay vì .add ──
+          // Key đầy đủ giai|noidung|bang|code để tránh lẫn giữa các giải/nội dung
+          const bc    = gName ? `${gName}|${ndVal}|${String(r.bang)}|${String(r.code)}`
+                               : `${ndVal}|${String(r.bang)}|${String(r.code)}`;
           if (_dkBangCode instanceof Map) {
             if (!_dkBangCode.has(bc)) _dkBangCode.set(bc, new Set());
             if (gName) _dkBangCode.get(bc).add(gName);
-          } else {
-            _dkBangCode.add(bc); // legacy fallback
           }
           if (gName) _dK.add(gName + '|' + String(r.bang) + '|' + String(r.code));
           // ── FIX: key _dkScores bao gồm giải ──
@@ -6517,7 +6513,7 @@ function renderBangList(giaiId, nd) {
         // Trọng tài: ưu tiên live → kết quả → Matches col 10
         const lkRef=`${m[1]}|${m[2]}|${m[3]}`;
         const lsRef=_liveScores[lkRef]||{};
-        const dkRef=_dkScores[`${String(m[0]||'').trim()}|${m[2]}|${m[3]}`]||_dkScores[`${m[2]}|${m[3]}`]||{};
+        const dkRef=_dkScores[`${String(m[0]||'').trim()}|${m[2]}|${m[3]}`]||{};
         const ref=String(lsRef.referee||m[10]||dkRef.referee||'');
         return `<tr style="border-left:2px solid #ea580c;background:rgba(234,88,12,.03)">
           <td style="padding:7px 8px;white-space:nowrap;text-align:center">
@@ -7475,11 +7471,11 @@ async function confirmDeleteBang(giaiId, nd, bang) {
   // Không xóa → tỉ số cũ trong _dkBangCode hiện lại ngay khi tạo bảng mới cùng tên
   matches.forEach(m => {
     const bg = String(m[2]||''), cd = String(m[3]||''), ndM = String(m[1]||''), g = String(m[0]||'');
-    const bcKey = `${ndM}|${bg}|${cd}`;
+    const bcKey = `${g}|${ndM}|${bg}|${cd}`; // giai|noidung|bang|code
     _dK.delete(`${g}|${bg}|${cd}`);
     if (_dkBangCode instanceof Map) _dkBangCode.delete(bcKey);
     delete _dkScores[`${g}|${bg}|${cd}`];
-    delete _dkScores[`${bg}|${cd}`];
+    // KHÔNG xóa key `bang|code` — tránh xóa nhầm entry của giải/nội dung khác
   });
 
   // ── Xóa cache + re-render ──
@@ -7569,11 +7565,11 @@ async function confirmDeleteAllBangs() {
   // FIX v3: Xóa _dK/_dkBangCode/_dkScores — tránh tỉ số cũ hiện lại khi tạo mới bảng
   allDelMatches.forEach(m => {
     const bg = String(m[2]||''), cd = String(m[3]||''), ndM = String(m[1]||''), g = String(m[0]||'');
-    const bcKey = `${ndM}|${bg}|${cd}`;
+    const bcKey = `${g}|${ndM}|${bg}|${cd}`; // giai|noidung|bang|code
     _dK.delete(`${g}|${bg}|${cd}`);
     if (_dkBangCode instanceof Map) _dkBangCode.delete(bcKey);
     delete _dkScores[`${g}|${bg}|${cd}`];
-    delete _dkScores[`${bg}|${cd}`];
+    // KHÔNG xóa key `bang|code` — tránh xóa nhầm entry của giải/nội dung khác
   });
 
   _invalidateMatchCache(giaiId);
