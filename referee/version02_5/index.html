@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- Pickleball v8.7 2026-06-03: FIX serve-dot cố định vị trí khi swap VĐV; equal-height player slots | v8.6: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
+<!-- Pickleball v8.7 2026-06-03: FIX layout HTML về cấu trúc gốc; player-slot fixed height 44px; serve-balls min-width giữ chỗ | v8.6: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
 <meta charset="UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>v2.5 - Da Nang Referee v17 – Pickleball</title>
+<title>v2.52 - Da Nang Referee v17 – Pickleball</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -201,11 +201,13 @@ select, input { font-family: inherit; }
   Layout: flex column, gap nhỏ giữa các hàng
   Nút ↑↓ nằm trong .swap-row, không che tên VĐV
 */
-/* Hàng = [khung tên flex:1] [badge] — không gap thừa, sát mép */
+/* Hàng = [khung tên flex:1] [dot] [badge] — không gap thừa, sát mép */
 .player-slot {
   display: flex; align-items: center;
   width: 100%;
   gap: 0;
+  height: 44px; /* cố định chiều cao bằng player-row — không nhảy khi swap */
+  flex-shrink: 0;
 }
 
 /* Khung tên — chiều cao cố định, flex:1 chiếm hết phần còn lại */
@@ -283,42 +285,22 @@ select, input { font-family: inherit; }
   flex-shrink: 0;
 }
 
-/* ── Layout mới: cột chấm cam CỐ ĐỊNH bên trái, cột tên bên phải ── */
+/* ── players-list: column thẳng đứng như cũ ── */
 .players-list {
   width: 100%;
   position: relative;
-  display: flex;          /* horizontal: [serve-col] [players-name-col] */
-  flex-direction: row;
-  align-items: stretch;
-  gap: 4px;
+  display: flex; flex-direction: column; gap: 3px;
   margin-bottom: 4px;
 }
-/* Cột chấm cam: luôn đứng yên, không di chuyển khi swap tên VĐV */
-.serve-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-around;
-  flex-shrink: 0;
-  width: 14px;            /* đủ chứa 1-2 chấm cam 8px */
-  padding: 2px 0;
-}
-.serve-col-gap {
-  flex: 1;                /* khoảng trống giữa 2 vị trí chấm — tương ứng khoảng cách 2 slot tên */
-  min-height: 10px;
-}
-/* Cột tên: flex:1, chứa 2 player-slot + nút swap */
-.players-name-col {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
+
+/* serve-balls: absolute bám vào player-right, KHÔNG di chuyển khi swap tên
+   Nguyên lý: serve-balls render đúng vị trí slot (top/bot) qua JS,
+   nhưng khi swap chỉ tên thay đổi, serve-balls vẫn đúng slot vì JS
+   gán theo slot id (sballs-a-top / sballs-a-bot), không theo tên VĐV */
 .serve-balls {
   display: flex; flex-direction: column; gap: 2px; align-items: center;
-  height: 20px; justify-content: center; /* chiều cao cố định = 1 slot */
+  margin-right: 2px;
+  min-width: 10px; /* giữ chỗ khi không có chấm để layout không nhảy */
 }
 .serve-dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -910,41 +892,35 @@ select, input { font-family: inherit; }
       <div class="srv-bar"></div>
       <div class="tgt-tag" id="tgt-a">→11</div>
       <div class="players-list" id="players-a">
-        <!-- serve-col: cột chấm cam CỐ ĐỊNH — không di chuyển khi swap tên VĐV -->
-        <div class="serve-col" id="serve-col-a">
-          <span class="serve-balls" id="sballs-a-top"></span>
-          <div class="serve-col-gap"></div>
-          <span class="serve-balls" id="sballs-a-bot"></span>
-        </div>
-        <div class="players-name-col">
-          <div class="player-slot">
-            <div class="player-row" id="player-a-top">
-              <div class="player-name-wrap">
-                <span class="player-name" id="pname-a-top">VĐV 1</span>
-                <button class="btn-note" onclick="togglePlayerNote('a','top')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
-              </div>
-              <span class="player-note-text" id="note-text-a-top"></span>
-              <input class="player-note-input" id="note-input-a-top" placeholder="Nhập ghi chú…" maxlength="60"
-                onblur="savePlayerNote('a','top')" onkeydown="if(event.key==='Enter')savePlayerNote('a','top')">
+        <div class="player-slot">
+          <div class="player-row" id="player-a-top">
+            <div class="player-name-wrap">
+              <span class="player-name" id="pname-a-top">VĐV 1</span>
+              <button class="btn-note" onclick="togglePlayerNote('a','top')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             </div>
-            <div class="player-right">
-              <span class="pos-badge pos-badge-2" id="pos-a-top">Ô2</span>
-            </div>
+            <span class="player-note-text" id="note-text-a-top"></span>
+            <input class="player-note-input" id="note-input-a-top" placeholder="Nhập ghi chú…" maxlength="60"
+              onblur="savePlayerNote('a','top')" onkeydown="if(event.key==='Enter')savePlayerNote('a','top')">
           </div>
-          <div class="swap-row"><button class="swap-players-btn" onclick="swapPlayersDisplay('a')" title="Hoán đổi vị trí 2 VĐV">↑↓</button></div>
-          <div class="player-slot">
-            <div class="player-row" id="player-a-bot">
-              <div class="player-name-wrap">
-                <span class="player-name" id="pname-a-bot">VĐV 2</span>
-                <button class="btn-note" onclick="togglePlayerNote('a','bot')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
-              </div>
-              <span class="player-note-text" id="note-text-a-bot"></span>
-              <input class="player-note-input" id="note-input-a-bot" placeholder="Nhập ghi chú…" maxlength="60"
-                onblur="savePlayerNote('a','bot')" onkeydown="if(event.key==='Enter')savePlayerNote('a','bot')">
+          <div class="player-right">
+            <span class="serve-balls" id="sballs-a-top"></span>
+            <span class="pos-badge pos-badge-2" id="pos-a-top">Ô2</span>
+          </div>
+        </div>
+        <div class="swap-row"><button class="swap-players-btn" onclick="swapPlayersDisplay('a')" title="Hoán đổi vị trí 2 VĐV">↑↓</button></div>
+        <div class="player-slot">
+          <div class="player-row" id="player-a-bot">
+            <div class="player-name-wrap">
+              <span class="player-name" id="pname-a-bot">VĐV 2</span>
+              <button class="btn-note" onclick="togglePlayerNote('a','bot')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             </div>
-            <div class="player-right">
-              <span class="pos-badge pos-badge-1" id="pos-a-bot">Ô1</span>
-            </div>
+            <span class="player-note-text" id="note-text-a-bot"></span>
+            <input class="player-note-input" id="note-input-a-bot" placeholder="Nhập ghi chú…" maxlength="60"
+              onblur="savePlayerNote('a','bot')" onkeydown="if(event.key==='Enter')savePlayerNote('a','bot')">
+          </div>
+          <div class="player-right">
+            <span class="serve-balls" id="sballs-a-bot"></span>
+            <span class="pos-badge pos-badge-1" id="pos-a-bot">Ô1</span>
           </div>
         </div>
       </div>
@@ -960,41 +936,35 @@ select, input { font-family: inherit; }
       <div class="srv-bar"></div>
       <div class="tgt-tag" id="tgt-b">→11</div>
       <div class="players-list" id="players-b">
-        <!-- serve-col: cột chấm cam CỐ ĐỊNH — không di chuyển khi swap tên VĐV -->
-        <div class="serve-col" id="serve-col-b">
-          <span class="serve-balls" id="sballs-b-top"></span>
-          <div class="serve-col-gap"></div>
-          <span class="serve-balls" id="sballs-b-bot"></span>
-        </div>
-        <div class="players-name-col">
-          <div class="player-slot">
-            <div class="player-row" id="player-b-top">
-              <div class="player-name-wrap">
-                <span class="player-name" id="pname-b-top">VĐV 1</span>
-                <button class="btn-note" onclick="togglePlayerNote('b','top')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
-              </div>
-              <span class="player-note-text" id="note-text-b-top"></span>
-              <input class="player-note-input" id="note-input-b-top" placeholder="Nhập ghi chú…" maxlength="60"
-                onblur="savePlayerNote('b','top')" onkeydown="if(event.key==='Enter')savePlayerNote('b','top')">
+        <div class="player-slot">
+          <div class="player-row" id="player-b-top">
+            <div class="player-name-wrap">
+              <span class="player-name" id="pname-b-top">VĐV 1</span>
+              <button class="btn-note" onclick="togglePlayerNote('b','top')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             </div>
-            <div class="player-right">
-              <span class="pos-badge pos-badge-1" id="pos-b-top">Ô1</span>
-            </div>
+            <span class="player-note-text" id="note-text-b-top"></span>
+            <input class="player-note-input" id="note-input-b-top" placeholder="Nhập ghi chú…" maxlength="60"
+              onblur="savePlayerNote('b','top')" onkeydown="if(event.key==='Enter')savePlayerNote('b','top')">
           </div>
-          <div class="swap-row"><button class="swap-players-btn" onclick="swapPlayersDisplay('b')" title="Hoán đổi vị trí 2 VĐV">↑↓</button></div>
-          <div class="player-slot">
-            <div class="player-row" id="player-b-bot">
-              <div class="player-name-wrap">
-                <span class="player-name" id="pname-b-bot">VĐV 2</span>
-                <button class="btn-note" onclick="togglePlayerNote('b','bot')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
-              </div>
-              <span class="player-note-text" id="note-text-b-bot"></span>
-              <input class="player-note-input" id="note-input-b-bot" placeholder="Nhập ghi chú…" maxlength="60"
-                onblur="savePlayerNote('b','bot')" onkeydown="if(event.key==='Enter')savePlayerNote('b','bot')">
+          <div class="player-right">
+            <span class="serve-balls" id="sballs-b-top"></span>
+            <span class="pos-badge pos-badge-1" id="pos-b-top">Ô1</span>
+          </div>
+        </div>
+        <div class="swap-row"><button class="swap-players-btn" onclick="swapPlayersDisplay('b')" title="Hoán đổi vị trí 2 VĐV">↑↓</button></div>
+        <div class="player-slot">
+          <div class="player-row" id="player-b-bot">
+            <div class="player-name-wrap">
+              <span class="player-name" id="pname-b-bot">VĐV 2</span>
+              <button class="btn-note" onclick="togglePlayerNote('b','bot')" title="Ghi chú"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.5 1.5a2.121 2.121 0 013 3L5 14H2v-3L11.5 1.5z" stroke="#64748b" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             </div>
-            <div class="player-right">
-              <span class="pos-badge pos-badge-2" id="pos-b-bot">Ô2</span>
-            </div>
+            <span class="player-note-text" id="note-text-b-bot"></span>
+            <input class="player-note-input" id="note-input-b-bot" placeholder="Nhập ghi chú…" maxlength="60"
+              onblur="savePlayerNote('b','bot')" onkeydown="if(event.key==='Enter')savePlayerNote('b','bot')">
+          </div>
+          <div class="player-right">
+            <span class="serve-balls" id="sballs-b-bot"></span>
+            <span class="pos-badge pos-badge-2" id="pos-b-bot">Ô2</span>
           </div>
         </div>
       </div>
