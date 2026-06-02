@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>v2.53 - Da Nang Referee v17 – Pickleball</title>
+<title>v2.523 - Da Nang Referee v17 – Pickleball</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -2563,23 +2563,29 @@ function _renderPlayerRows() {
   const m = S.currentMatch;
   const playersA = (m && m.playersA) ? m.playersA : S.playersA;
   const playersB = (m && m.playersB) ? m.playersB : S.playersB;
-  if (!S.posA) S.posA = [0, 1]; // posA[0]=Ô1idx, posA[1]=Ô2idx
-  if (!S.posB) S.posB = [0, 1]; // posB[0]=Ô1idx, posB[1]=Ô2idx
+  if (!S.posA) S.posA = [0, 1];
+  if (!S.posB) S.posB = [0, 1];
+
+  // FIX: isServer tính theo Ô vật lý (slot), KHÔNG theo tên VĐV
+  // → chấm cam đứng yên khi swap tên, chỉ tên thay đổi
   {
     const isServing = S.server === 'a';
     const o1 = S.posA[0]; // playerDataIdx ở Ô1 (bot)
     const o2 = S.posA[1]; // playerDataIdx ở Ô2 (top)
-    const sIdx = isServing ? S.serverPlayerIdx : -1;
-    _setPlayerSlot('a','top', playersA, o2, isServing && o2===sIdx, 'Ô2','pos-badge-2');
-    _setPlayerSlot('a','bot', playersA, o1, isServing && o1===sIdx, 'Ô1','pos-badge-1');
+    // Ô nào đang giao bóng = ô chứa serverPlayerIdx
+    const serverSlotIsBot = isServing && S.posA[0] === S.serverPlayerIdx;
+    const serverSlotIsTop = isServing && S.posA[1] === S.serverPlayerIdx;
+    _setPlayerSlot('a','top', playersA, o2, serverSlotIsTop, 'Ô2','pos-badge-2');
+    _setPlayerSlot('a','bot', playersA, o1, serverSlotIsBot, 'Ô1','pos-badge-1');
   }
   {
     const isServing = S.server === 'b';
     const o1 = S.posB[0]; // playerDataIdx ở Ô1 (top)
     const o2 = S.posB[1]; // playerDataIdx ở Ô2 (bot)
-    const sIdx = isServing ? S.serverPlayerIdx : -1;
-    _setPlayerSlot('b','top', playersB, o1, isServing && o1===sIdx, 'Ô1','pos-badge-1');
-    _setPlayerSlot('b','bot', playersB, o2, isServing && o2===sIdx, 'Ô2','pos-badge-2');
+    const serverSlotIsTop = isServing && S.posB[0] === S.serverPlayerIdx;
+    const serverSlotIsBot = isServing && S.posB[1] === S.serverPlayerIdx;
+    _setPlayerSlot('b','top', playersB, o1, serverSlotIsTop, 'Ô1','pos-badge-1');
+    _setPlayerSlot('b','bot', playersB, o2, serverSlotIsBot, 'Ô2','pos-badge-2');
   }
 
   _updateScoreBtnLock();
@@ -3403,8 +3409,6 @@ function swapPlayersDisplay(side) {
     if (servingSlot === 'top') S.serverPlayerIdx = S.posB[0];
     if (servingSlot === 'bot') S.serverPlayerIdx = S.posB[1];
   }
-  render();
-}
   render();
 }
 
